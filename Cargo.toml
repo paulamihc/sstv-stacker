@@ -8,7 +8,7 @@ edition = "2021"
 authors = ["Paul Friend"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/paulamihc/sstv-stacker"
-homepage = "https://sstv-stacker.netlify.app"
+homepage = "https://sstvstacker.netlify.app"
 rust-version = "1.82"
 
 [profile.release]

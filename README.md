@@ -16,7 +16,7 @@ SSTV Stacker finds which of your pictures are copies of the same one, and combin
 
 ## Use it
 
-- **In your browser:** <https://sstv-stacker.netlify.app>.
+- **In your browser:** <https://sstvstacker.netlify.app>.
   1. Choose a folder of pictures.
   2. Look at each result beside its best single copy.
   3. Download them as a zip, or, in Chrome or Edge, save them straight into a folder.
