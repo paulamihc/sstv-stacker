@@ -8,7 +8,7 @@
   for = "/*"
   [headers.values]
     # The page loads nothing from any other site and sends nothing anywhere.
-    # The two hashes allow Netlify's "Hosted on Netlify" badge (part of the
+    # The hashes allow Netlify's "Hosted on Netlify" badge (part of the
     # free plan), which draws itself with one inline script and two inline
     # styles; nothing else inline runs. If Netlify changes the badge, its new
     # hashes show in the browser console, and go here.
