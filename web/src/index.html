@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SSTV Stacker</title>
+<meta name="description" content="Combine repeat copies of an SSTV picture into one better copy. Nothing made up. Runs in your browser: your pictures never leave your computer.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<header class="masthead">
+  <div class="wrap">
+    <p class="kicker">Slow-scan TV &middot; picture stacking</p>
+    <h1>SSTV Stacker</h1>
+    <p class="strap">Combine repeat copies of an SSTV picture into one better copy. <strong>Nothing made up.</strong></p>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="panel" id="choose" aria-labelledby="choose-h">
+    <h2 id="choose-h">1. Choose your pictures</h2>
+    <p>Choose a folder of SSTV pictures: PNG, JPEG or BMP, from any decoder. It can hold several different pictures, each received a few times; SSTV Stacker works out which copies go together. Folders inside it are read too.</p>
+    <div class="drop" id="drop">
+      <div class="buttons">
+        <label class="button primary" for="pick-folder">Choose folder</label>
+        <input type="file" id="pick-folder" webkitdirectory multiple hidden>
+        <label class="button" for="pick-files">Choose pictures</label>
+        <input type="file" id="pick-files" accept=".png,.jpg,.jpeg,.bmp,image/png,image/jpeg,image/bmp" multiple hidden>
+      </div>
+      <p class="hint">or drop a folder or pictures here</p>
+    </div>
+    <details class="options">
+      <summary>Options</summary>
+      <label for="colour-fix">Put swapped Robot 36 colours back</label>
+      <select id="colour-fix">
+        <option value="0" selected>Automatically, for Robot 36 pictures</option>
+        <option value="1">Always</option>
+        <option value="2">Never</option>
+      </select>
+      <p class="hint">Robot 36 sends red and blue colour on alternate lines. If a decoder loses track of which is which, the colours swap (orange shows as blue). Other modes can't swap like that.</p>
+    </details>
+  </section>
+
+  <section class="panel" id="working" hidden aria-live="polite">
+    <h2>2. Stacking</h2>
+    <p id="status">Reading pictures&hellip;</p>
+    <div class="meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="meter"><span id="meter-bar"></span></div>
+  </section>
+
+  <section id="results" hidden aria-labelledby="results-h">
+    <div class="panel results-head">
+      <h2 id="results-h">3. Your best copies</h2>
+      <p id="summary"></p>
+      <div class="buttons">
+        <button type="button" class="button primary" id="save-zip">Download zip</button>
+        <button type="button" class="button" id="save-folder" hidden>Save into a folder</button>
+        <button type="button" class="button quiet" id="again">Start again</button>
+      </div>
+      <p class="hint" id="saved" aria-live="polite"></p>
+      <ul class="problems" id="problems" hidden></ul>
+    </div>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <section class="about" aria-labelledby="rules-h">
+    <h2 id="rules-h">Nothing made up</h2>
+    <ol class="rules">
+      <li><strong>Every pixel comes from your copies.</strong> At each place, the copies that agree are averaged, weighted by how cleanly each line came in. Every value lies between the lowest and highest your copies hold there. No AI, no filling in, no upscaling, no guessing between lines.</li>
+      <li><strong>A line no copy received stays missing,</strong> shown as a grey hatched band.</li>
+      <li><strong>Only decoding errors are undone:</strong> copies are lined up (a shift of a few pixels), and swapped Robot 36 colours are put back.</li>
+    </ol>
+    <p>Each combined picture keeps the details of its strongest copy (such as time, frequency and callsign), with four added: which copies it was combined from, the strongest copy, the coverage, and what combined it. A record beside it says how each line was made. A picture received only once is passed on exactly as it was.</p>
+    <h2>Private</h2>
+    <p>Everything happens in your browser. Your pictures are never uploaded: this page has no server to send them to, no tracking and no analytics.</p>
+  </section>
+</main>
+
+<footer class="wrap foot">
+  <p>SSTV Stacker <span id="version">0.1.0</span> &middot; &copy; 2026 Paul Friend &middot; open source under the MIT or Apache 2.0 licence &middot; <a href="https://github.com/paulamihc/sstv-stacker">source code</a></p>
+</footer>
+
+<template id="card">
+  <article class="card">
+    <div class="pair">
+      <figure><img class="before" alt=""><figcaption>Best single copy</figcaption></figure>
+      <figure><img class="after" alt=""><figcaption class="after-cap"></figcaption></figure>
+    </div>
+    <h3 class="name"></h3>
+    <dl class="figures">
+      <div><dt>Noise</dt><dd class="noise"></dd></div>
+      <div><dt>Lines received</dt><dd class="coverage"></dd></div>
+    </dl>
+    <details class="record">
+      <summary>How it was made</summary>
+      <table>
+        <thead><tr><th scope="col">Copy</th><th scope="col">Shift</th><th scope="col">Noise</th><th scope="col">Notes</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </details>
+  </article>
+</template>
+</body>
+</html>

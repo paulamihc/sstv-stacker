@@ -1,0 +1,25 @@
+[package]
+name = "sstv-stacker"
+description = "Combine repeat copies of an SSTV picture into one better copy. Nothing made up."
+readme = "../../README.md"
+keywords = ["sstv", "ham-radio", "image-stacking", "amateur-radio", "iss"]
+categories = ["multimedia::images"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["files"]
+# Reading and writing PNG, JPEG and BMP files, and filing results in a
+# folder. Without it, only the combining itself (no dependencies).
+files = ["dep:png", "dep:jpeg-decoder", "dep:serde", "dep:serde_json"]
+
+[dependencies]
+png = { version = "0.17", optional = true }
+jpeg-decoder = { version = "0.3", default-features = false, optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", features = ["float_roundtrip"], optional = true }

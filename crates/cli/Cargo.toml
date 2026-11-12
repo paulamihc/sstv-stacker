@@ -1,0 +1,20 @@
+[package]
+name = "sstv-stacker-cli"
+description = "Command line for SSTV Stacker: combine repeat copies of SSTV pictures in a folder. Nothing made up."
+readme = "../../README.md"
+keywords = ["sstv", "ham-radio", "image-stacking", "amateur-radio"]
+categories = ["command-line-utilities", "multimedia::images"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "sstv-stacker"
+path = "src/main.rs"
+
+[dependencies]
+sstv-stacker = { path = "../stacker", version = "0.1.0" }
