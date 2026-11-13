@@ -17,4 +17,4 @@ name = "sstv-stacker"
 path = "src/main.rs"
 
 [dependencies]
-sstv-stacker = { path = "../stacker", version = "0.1.0" }
+sstv-stacker = { path = "../stacker", version = "0.1.1" }

@@ -37,6 +37,27 @@ struct Entry {
     /// Its record's file name in `Records/`, if it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     record: Option<String>,
+    /// The combining method it was made by ([`METHOD`]; 0 in an index
+    /// from before methods were numbered).
+    #[serde(default)]
+    method: u32,
+}
+
+/// The combining method, numbered so that pictures made by an older one
+/// are made again once: 1 lines up copies decoded many lines out of place,
+/// and leaves out those it can't.
+const METHOD: u32 = 1;
+
+/// Whether two picture files hold the same pixels.
+fn same_pixels(a: &[u8], b: &[u8]) -> bool {
+    match (crate::formats::read(a), crate::formats::read(b)) {
+        (Ok(a), Ok(b)) => {
+            a.image.width == b.image.width
+                && a.image.height == b.image.height
+                && a.image.rgb == b.image.rgb
+        }
+        _ => false,
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -214,7 +235,7 @@ pub fn update(
             claimed[i] = true;
             let e = &index.pictures[i];
             let same: BTreeSet<String> = e.ids.iter().cloned().collect();
-            if same == ids && out.join(&e.file).exists() {
+            if same == ids && out.join(&e.file).exists() && e.method >= METHOD {
                 summary.pictures += 1;
                 summary.combined += usize::from(g.len() > 1);
                 summary.kept += 1;
@@ -230,11 +251,22 @@ pub fn update(
         summary.combined += usize::from(g.len() > 1);
         if let Some(i) = existing {
             let e = &mut index.pictures[i];
-            if out.join(&e.file).exists() && b.combined.noise >= e.noise - 0.05 {
+            let path = out.join(&e.file);
+            let older = e.method < METHOD;
+            // Made by an older method: the same pixels again are kept as
+            // they are; different ones replace it, whatever the noise
+            // estimates say (an older method could misjudge them).
+            let unchanged =
+                older && std::fs::read(&path).is_ok_and(|old| same_pixels(&old, &b.bytes));
+            if unchanged || (!older && path.exists() && b.combined.noise >= e.noise - 0.05) {
                 // No better: kept, with the copies looked at remembered so
                 // the same set isn't worked through again.
                 e.ids = ids.into_iter().collect();
                 e.sources = sources;
+                if unchanged {
+                    e.method = METHOD;
+                    e.noise = b.combined.noise;
+                }
                 summary.kept += 1;
                 save_index(&index_path, &index)?;
                 continue;
@@ -293,6 +325,7 @@ pub fn update(
             ids: ids.into_iter().collect(),
             noise: b.combined.noise,
             record,
+            method: METHOD,
         };
         match existing {
             Some(i) => index.pictures[i] = entry,

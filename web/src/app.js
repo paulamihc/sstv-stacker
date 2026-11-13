@@ -244,11 +244,12 @@ function card(m) {
       if (i === m.record.strongest) notes.push("strongest");
       if (c.swapped) notes.push("colours put back");
       if (c.note) notes.push(c.note);
-      if (!c.used) notes.push("not used");
+      if (c.left_out) notes.push("left out: too far out of place to line up");
+      else if (!c.used) notes.push("not used");
       for (const [text, cls] of [
         [c.name, "copy"],
-        [c.shift[0] + ", " + c.shift[1], ""],
-        [fmt(c.noise), ""],
+        [c.left_out ? "–" : c.shift[0] + ", " + c.shift[1], ""],
+        [c.left_out ? "–" : fmt(c.noise), ""],
         [notes.join("; "), ""],
       ]) {
         const td = document.createElement("td");

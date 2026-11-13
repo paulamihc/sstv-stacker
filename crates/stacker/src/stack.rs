@@ -58,9 +58,15 @@ const FRAME_MOST: f64 = 0.6;
 /// The least share of the picture's height two copies must both have to
 /// be compared at all.
 const GROUP_OVERLAP: f64 = 1.0 / 3.0;
-/// Shifts searched when lining copies up, pixels.
+/// Shifts searched when lining copies up, pixels: sideways, and the least
+/// searched up and down (a fifth of the picture's height is searched where
+/// that is more).
 const ALIGN_DX: i32 = 10;
 const ALIGN_DY: i32 = 6;
+/// A match is clear when its cost is at most this share of the typical
+/// cost over all the shifts searched (on real ISS copies, 0.2 to 0.6 for a
+/// good copy, up to about 0.9 for a very noisy one).
+const ALIGN_CLEAR: f64 = 0.8;
 /// Lines two copies must share to be lined up with each other.
 const ALIGN_ROWS: usize = 16;
 /// Colour swaps are judged on pixels whose Cr and Cb differ by at least
@@ -429,6 +435,9 @@ pub struct Combined {
     pub used: Vec<usize>,
     /// Each copy's shift to line it up, (right, down) in pixels.
     pub shifts: Vec<(i32, i32)>,
+    /// Copies too far out of place to line up, so left out: (0, 0) in
+    /// `shifts`, and no lines from them.
+    pub left_out: Vec<usize>,
     /// Copies whose colours were swapped and put back.
     pub swapped: Vec<usize>,
     /// The share of lines received by at least one copy, 0 to 1.
@@ -575,11 +584,18 @@ pub fn combine_with(copies: &[&Image], elevations: &[Option<f64>], opts: Options
         }
     };
     paint(&mut mosaic, &planes[reference], 0, 0);
+    let mut left_out = Vec::new();
     for &i in &order {
-        let (dx, dy) = align(&mosaic, &planes[i], w, h);
-        shifts[i] = (dx, dy);
-        paint(&mut mosaic, &planes[i], dx, dy);
+        match align(&mosaic, &planes[i], w, h) {
+            Some((dx, dy)) => {
+                shifts[i] = (dx, dy);
+                paint(&mut mosaic, &planes[i], dx, dy);
+            }
+            // Too far out to line up: left out, so it gives no lines.
+            None => left_out.push(i),
+        }
     }
+    left_out.sort();
 
     // 3. Swapped colours: each copy against the reference, then a vote on
     //    which way is right. With two copies there is no majority, so the
@@ -587,7 +603,9 @@ pub fn combine_with(copies: &[&Image], elevations: &[Option<f64>], opts: Options
     let mut planes = planes;
     let rel: Vec<Option<bool>> = (0..k)
         .map(|i| {
-            if i == reference || !opts.colour_fix {
+            if left_out.contains(&i) {
+                None
+            } else if i == reference || !opts.colour_fix {
                 Some(false)
             } else {
                 swapped_against(&planes[reference], &planes[i], shifts[i])
@@ -617,7 +635,11 @@ pub fn combine_with(copies: &[&Image], elevations: &[Option<f64>], opts: Options
         .map(|(i, pl)| Placed {
             dx: shifts[i].0,
             dy: shifts[i].1,
-            w: rough_w[i].clone(),
+            w: if left_out.contains(&i) {
+                vec![0.0; h]
+            } else {
+                rough_w[i].clone()
+            },
             pl,
         })
         .collect();
@@ -636,7 +658,9 @@ pub fn combine_with(copies: &[&Image], elevations: &[Option<f64>], opts: Options
             // How many copies have this line.
             let others = placed
                 .iter()
-                .filter(|o| {
+                .enumerate()
+                .filter(|(j, _)| !left_out.contains(j))
+                .filter(|(_, o)| {
                     let oy = y as i32 - o.dy;
                     oy >= 0 && (oy as usize) < h && o.pl.row_ok[oy as usize]
                 })
@@ -667,7 +691,7 @@ pub fn combine_with(copies: &[&Image], elevations: &[Option<f64>], opts: Options
     }
     for (i, c) in placed.iter_mut().enumerate() {
         for sy in 0..h {
-            c.w[sy] = if c.pl.row_ok[sy] {
+            c.w[sy] = if c.pl.row_ok[sy] && !left_out.contains(&i) {
                 weight_for(noise[i][sy])
             } else {
                 0.0
@@ -765,6 +789,7 @@ pub fn combine_with(copies: &[&Image], elevations: &[Option<f64>], opts: Options
         strongest,
         used,
         shifts,
+        left_out,
         swapped,
         coverage,
         missing_rows,
@@ -777,53 +802,96 @@ pub fn combine_with(copies: &[&Image], elevations: &[Option<f64>], opts: Options
 
 /// The shift (right, down) that best lines `pl` up with the mosaic: the
 /// least mean brightness difference over what both have. (0, 0) when they
-/// share too little to say.
-fn align(mosaic: &[Option<f32>], pl: &Planes, w: usize, h: usize) -> (i32, i32) {
-    let mut best: Option<(f64, i32, i32)> = None;
+/// share too little to say. None when the copy can't be lined up: its best
+/// match is at the edge of the search (it is further out than that), or is
+/// unclear and would move it more than a little.
+///
+/// Up and down the search reaches a fifth of the picture: a decoder that
+/// starts a picture from its line sync pulses (having missed the header)
+/// can guess wrongly which line it joined at, by tens of lines. To keep
+/// that fast, a coarse search (every other sideways shift, a sample of the
+/// pixels) is followed by a fine one around its best.
+fn align(mosaic: &[Option<f32>], pl: &Planes, w: usize, h: usize) -> Option<(i32, i32)> {
+    let max_dy = ((h / 5) as i32).max(ALIGN_DY);
     let mut per_row: Vec<f64> = Vec::with_capacity(h);
-    for dy in -ALIGN_DY..=ALIGN_DY {
-        for dx in -ALIGN_DX..=ALIGN_DX {
-            per_row.clear();
-            for sy in 0..h {
-                if !pl.row_ok[sy] {
-                    continue;
-                }
-                let y = sy as i32 + dy;
-                if y < 0 || y >= h as i32 {
-                    continue;
-                }
-                let (mut s, mut n) = (0.0f64, 0usize);
-                // Every other pixel is plenty.
-                for sx in (0..w).step_by(2) {
-                    let x = sx as i32 + dx;
-                    if x < 0 || x >= w as i32 {
-                        continue;
-                    }
-                    if let Some(m) = mosaic[y as usize * w + x as usize] {
-                        s += (m - pl.p[0][sy * w + sx]).abs() as f64;
-                        n += 1;
-                    }
-                }
-                if n > w / 4 {
-                    per_row.push(s / n as f64);
-                }
-            }
-            if per_row.len() < ALIGN_ROWS {
+    // The cost of one shift, on every `step`-th pixel of each line.
+    let mut cost = |dx: i32, dy: i32, step: usize| -> Option<f64> {
+        per_row.clear();
+        for sy in 0..h {
+            if !pl.row_ok[sy] {
                 continue;
             }
-            // The better half of the rows: noisy lines in either picture
-            // say nothing about the shift.
-            per_row.sort_by(|a, b| a.total_cmp(b));
-            let half = &per_row[..per_row.len() / 2];
-            let diff = half.iter().sum::<f64>() / half.len() as f64;
-            // A small preference for no shift, so a flat picture stays put.
-            let cost = diff + 0.05 * (dx.abs() + dy.abs()) as f64;
-            if best.is_none_or(|b| cost < b.0) {
-                best = Some((cost, dx, dy));
+            let y = sy as i32 + dy;
+            if y < 0 || y >= h as i32 {
+                continue;
+            }
+            let (mut s, mut n) = (0.0f64, 0usize);
+            for sx in (0..w).step_by(step) {
+                let x = sx as i32 + dx;
+                if x < 0 || x >= w as i32 {
+                    continue;
+                }
+                if let Some(m) = mosaic[y as usize * w + x as usize] {
+                    s += (m - pl.p[0][sy * w + sx]).abs() as f64;
+                    n += 1;
+                }
+            }
+            if n > w / (2 * step) {
+                per_row.push(s / n as f64);
+            }
+        }
+        if per_row.len() < ALIGN_ROWS {
+            return None;
+        }
+        // The better half of the rows: noisy lines in either picture
+        // say nothing about the shift.
+        per_row.sort_by(|a, b| a.total_cmp(b));
+        let half = &per_row[..per_row.len() / 2];
+        let diff = half.iter().sum::<f64>() / half.len() as f64;
+        // A small preference for no shift, so a flat picture stays put.
+        Some(diff + 0.05 * (dx.abs() + dy.abs()) as f64)
+    };
+    let mut coarse: Option<(f64, i32, i32)> = None;
+    let mut all: Vec<f64> = Vec::new();
+    for dy in -max_dy..=max_dy {
+        for dx in (-ALIGN_DX..=ALIGN_DX).step_by(2) {
+            if let Some(c) = cost(dx, dy, 4) {
+                all.push(c);
+                if coarse.is_none_or(|b| c < b.0) {
+                    coarse = Some((c, dx, dy));
+                }
             }
         }
     }
-    best.map_or((0, 0), |b| (b.1, b.2))
+    let Some((_, cx, cy)) = coarse else {
+        return Some((0, 0));
+    };
+    let mut best: Option<(f64, i32, i32)> = None;
+    for dy in (cy - 2).max(-max_dy)..=(cy + 2).min(max_dy) {
+        for dx in (cx - 2).max(-ALIGN_DX)..=(cx + 2).min(ALIGN_DX) {
+            if let Some(c) = cost(dx, dy, 2) {
+                if best.is_none_or(|b| c < b.0) {
+                    best = Some((c, dx, dy));
+                }
+            }
+        }
+    }
+    let (_, dx, dy) = best?;
+    if dy.abs() == max_dy || dx.abs() == ALIGN_DX {
+        return None;
+    }
+    // How clear the match is: its cost against the typical (median) cost
+    // over all the shifts searched. A copy that matches nowhere clearly is
+    // trusted only where it needs no real move, as a noisy copy in its
+    // right place does; moved further on an unclear match it may be
+    // anywhere, so it is left out.
+    all.sort_by(|a, b| a.total_cmp(b));
+    let typical = all[all.len() / 2];
+    let clear = typical > 0.0 && coarse.map_or(0.0, |c| c.0) / typical <= ALIGN_CLEAR;
+    if !clear && (dx.abs() > 2 || dy.abs() > 1) {
+        return None;
+    }
+    Some((dx, dy))
 }
 
 /// Whether `c` (shifted by `shift`) has its colours swapped against `r`:
@@ -1144,6 +1212,57 @@ mod tests {
         assert!(combined < 10.0, "combined error {combined:.1}");
         assert!(c.noise < c.copy_noise.iter().cloned().fold(f64::INFINITY, f64::min));
         assert!(c.leave_one_out.iter().all(|v| v.is_some()));
+    }
+
+    #[test]
+    fn a_copy_decoded_many_lines_out_is_lined_up() {
+        // As when a decoder missed the header, started from the line sync
+        // pulses and misjudged which line it had joined at.
+        let (w, h) = (320, 240);
+        let truth = framed(scene(w, h, 5));
+        let copies = [
+            damaged(&truth, 1, 14.0, 0..40, 0..0, (0, 0), false),
+            damaged(&truth, 2, 14.0, 100..140, 0..0, (1, 0), false),
+            damaged(&truth, 3, 14.0, 180..220, 0..0, (0, 0), false),
+            damaged(&truth, 4, 20.0, 0..0, 0..15, (0, 15), false),
+        ];
+        let refs: Vec<&Image> = copies.iter().collect();
+        let c = combine(&refs, &[None; 4]);
+        assert!(c.left_out.is_empty(), "left out {:?}", c.left_out);
+        let made = [(0, 0), (1, 0), (0, 0), (0, 15)];
+        for i in 0..4 {
+            let got = (c.shifts[i].0 - c.shifts[0].0, c.shifts[i].1 - c.shifts[0].1);
+            assert_eq!(
+                got,
+                (made[0].0 - made[i].0, made[0].1 - made[i].1),
+                "copy {i}"
+            );
+        }
+        assert!(c.used.contains(&3));
+        let rows: Vec<usize> = (20..h - 20).collect();
+        let combined = error(&truth, &c.image, &rows, c.shifts[0]);
+        assert!(combined < 10.0, "combined error {combined:.1}");
+    }
+
+    #[test]
+    fn a_copy_too_far_out_is_left_out() {
+        let (w, h) = (320, 240);
+        let truth = framed(scene(w, h, 6));
+        let copies = [
+            damaged(&truth, 1, 14.0, 0..40, 0..0, (0, 0), false),
+            damaged(&truth, 2, 14.0, 100..140, 0..0, (0, 0), false),
+            damaged(&truth, 3, 14.0, 180..220, 0..0, (0, 0), false),
+            damaged(&truth, 4, 20.0, 0..0, 0..70, (0, 70), false),
+        ];
+        let refs: Vec<&Image> = copies.iter().collect();
+        let c = combine(&refs, &[None; 4]);
+        assert_eq!(c.left_out, vec![3]);
+        assert!(!c.used.contains(&3));
+        assert_eq!(c.shifts[3], (0, 0));
+        // The same picture as without it.
+        let without = combine(&refs[..3], &[None; 3]);
+        assert!(without.left_out.is_empty());
+        assert_eq!(c.image.rgb, without.image.rgb);
     }
 
     #[test]

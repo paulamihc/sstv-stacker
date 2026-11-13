@@ -30,6 +30,18 @@ pub fn text(copies: &[CopyInfo], c: &Combined, file: &str) -> String {
     );
     s += "Copies (shift to line up, right and down; estimated noise; leave one out: how far it is from the others combined)\n";
     for (i, cp) in copies.iter().enumerate() {
+        if c.left_out.contains(&i) {
+            s += &format!(
+                "  {}. {}: left out, too far out of place to line up (the decoder probably misjudged where the picture started){}\n",
+                i + 1,
+                cp.name,
+                cp.note
+                    .as_ref()
+                    .map(|n| format!(", {n}"))
+                    .unwrap_or_default(),
+            );
+            continue;
+        }
         let (dx, dy) = c.shifts[i];
         s += &format!(
             "  {}. {}: shift ({dx}, {dy}), noise {:.1}{}{}{}{}\n",
@@ -101,7 +113,7 @@ pub fn json(copies: &[CopyInfo], c: &Combined, file: &str) -> String {
             s += ",";
         }
         s += &format!(
-            "{{\"name\":{},\"shift\":[{},{}],\"noise\":{},\"leave_one_out\":{},\"swapped\":{},\"used\":{},\"note\":{}}}",
+            "{{\"name\":{},\"shift\":[{},{}],\"noise\":{},\"leave_one_out\":{},\"swapped\":{},\"used\":{},\"left_out\":{},\"note\":{}}}",
             quote(&cp.name),
             c.shifts[i].0,
             c.shifts[i].1,
@@ -109,6 +121,7 @@ pub fn json(copies: &[CopyInfo], c: &Combined, file: &str) -> String {
             c.leave_one_out[i].map(num).unwrap_or_else(|| "null".into()),
             c.swapped.contains(&i),
             c.used.contains(&i),
+            c.left_out.contains(&i),
             cp.note.as_deref().map(quote).unwrap_or_else(|| "null".into()),
         );
     }

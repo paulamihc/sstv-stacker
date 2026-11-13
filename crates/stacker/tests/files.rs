@@ -383,6 +383,66 @@ fn a_better_rebuild_replaces_and_keeps_the_old_one() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Takes the method numbers out of `index.json`, as an index written
+/// before they were numbered.
+fn as_older_index(out: &Path) {
+    let p = out.join("index.json");
+    let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
+    for e in v["pictures"].as_array_mut().unwrap() {
+        e.as_object_mut().unwrap().remove("method");
+    }
+    std::fs::write(&p, serde_json::to_vec(&v).unwrap()).unwrap();
+}
+
+#[test]
+fn a_picture_made_by_an_older_method_is_made_again_once() {
+    let dir = temp("method");
+    let s = scene();
+    std::fs::write(dir.join("1.png"), png(&damaged(&s, 41, 0.5, 0..60), &[])).unwrap();
+    std::fs::write(dir.join("2.png"), png(&damaged(&s, 42, 0.5, 180..240), &[])).unwrap();
+    let out = dir.join("out");
+    let first = folder::update(&dir, &out, &Settings::default(), &|| false).unwrap();
+    assert_eq!(first.added, 1);
+    let made = tree(&out);
+
+    // The same pixels again: nothing is touched, and it isn't made again
+    // after that.
+    as_older_index(&out);
+    let again = folder::update(&dir, &out, &Settings::default(), &|| false).unwrap();
+    assert_eq!(
+        (again.added, again.replaced, again.kept),
+        (0, 0, 1),
+        "{again:?}"
+    );
+    let t = tree(&out);
+    for (k, v) in &made {
+        if k != "index.json" {
+            assert_eq!(t.get(k), Some(v), "{k} changed");
+        }
+    }
+    let v: serde_json::Value = serde_json::from_slice(&t["index.json"]).unwrap();
+    assert_eq!(v["pictures"][0]["method"], 1);
+
+    // Different pixels (as a copy lined up wrongly made): replaced, even
+    // though the old file's noise estimate looks better.
+    let file = made
+        .keys()
+        .find(|k| k.ends_with(".png") && !k.contains('/'))
+        .unwrap()
+        .clone();
+    std::fs::write(out.join(&file), png(&damaged(&s, 43, 0.5, 0..0), &[])).unwrap();
+    as_older_index(&out);
+    let idx = out.join("index.json");
+    let text = String::from_utf8(std::fs::read(&idx).unwrap()).unwrap();
+    let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    v["pictures"][0]["noise"] = serde_json::json!(0.0);
+    std::fs::write(&idx, serde_json::to_vec(&v).unwrap()).unwrap();
+    let fixed = folder::update(&dir, &out, &Settings::default(), &|| false).unwrap();
+    assert_eq!(fixed.replaced, 1, "{fixed:?}");
+    assert_eq!(tree(&out).get(&file), made.get(&file));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_stop_part_way_keeps_what_was_done() {
     let dir = temp("stop");
